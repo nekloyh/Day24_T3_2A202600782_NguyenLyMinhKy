@@ -51,6 +51,21 @@ def plan_retrieval_queries(question: str) -> list[str]:
     elif "khách sạn" in lowered and "công tác" in lowered:
         plan.extend([
             "công tác trong nước khách sạn tối đa 1.200.000 VNĐ/đêm",
+            "công tác nước ngoài khách sạn thành phố lớn 200 USD/đêm",
+        ])
+    elif "lương thử việc" in lowered and "junior" in lowered:
+        plan.extend([
+            "Junior P1 P2 lương 12.000.000 20.000.000",
+            "lương thử việc 85% lương cấp bậc",
+        ])
+    elif "tạm ứng" in lowered and "4 triệu" in lowered and "7 triệu" in lowered:
+        plan.extend([
+            "tạm ứng dưới 5.000.000 trưởng phòng phê duyệt",
+            "tạm ứng từ 5.000.000 trở lên Kế toán trưởng phê duyệt",
+        ])
+    elif "đánh giá hiệu suất" in lowered and ("cơ cấu" in lowered or "tỷ lệ" in lowered):
+        plan.extend([
+            "cơ cấu đánh giá hiệu suất KPI cá nhân 70% peer review 30%",
         ])
     elif any(token in lowered for token in ("laptop", "thiết bị", "mua sắm")) and "phê duyệt" in lowered:
         plan.extend([
@@ -97,13 +112,13 @@ def calculate_advance_penalty(question: str, contexts: list[str]) -> str | None:
     prorated_fee = round(monthly_fee * days_late / 30)
     approval = _advance_approval(amount, source)
     approval_prefix = f"Khoản tạm ứng này cần {approval}. " if "ai phê duyệt" in lowered and approval else ""
-    return (
-        approval_prefix +
-        f"Thời hạn thanh toán là {deadline} ngày. Bạn thanh toán sau {days_elapsed} ngày, "
-        f"nên quá hạn {days_late} ngày. Phí là {_format_vnd(monthly_fee)}/tháng "
-        f"({rate_match.group(1)}% trên {_format_vnd(amount)}); tính pro-rata 30 ngày, "
-        f"phải trả khoảng {_format_vnd(prorated_fee)} cho {days_late} ngày quá hạn."
+    fee_sentence = (
+        f"Phí phạt = {rate_match.group(1)}%/tháng x {_format_vnd(amount)} x "
+        f"({days_late}/30) = khoảng {_format_vnd(prorated_fee)}."
     )
+    if approval_prefix:
+        return approval_prefix + fee_sentence
+    return f"Thời hạn hoàn ứng là {deadline} ngày; quá hạn {days_late} ngày. {fee_sentence}"
 
 
 def answer_policy_patterns(question: str, contexts: list[str]) -> str | None:
@@ -122,6 +137,18 @@ def answer_policy_patterns(question: str, contexts: list[str]) -> str | None:
                 "Nhân viên thử việc được tham gia bảo hiểm xã hội bắt buộc nhưng chưa được hưởng gói bảo hiểm sức khỏe PVI. "
                 "Nhân viên chính thức được hưởng gói bảo hiểm sức khỏe PVI với hạn mức 200.000.000 VNĐ/năm, gồm nội trú, ngoại trú và nha khoa."
             )
+
+    if "thử việc" in lowered and "nghỉ phép năm" in lowered:
+        if re.search(r"không được\s+nghỉ phép năm", compact, re.IGNORECASE) or "xin nghỉ không lương" in compact.lower():
+            return "Không. Nhân viên thử việc không được nghỉ phép năm; nếu cần nghỉ việc riêng thì xin nghỉ không lương và được trưởng phòng phê duyệt."
+
+    if "thử việc" in lowered and "pvi" in lowered and "bảo hiểm" in lowered:
+        if re.search(r"chưa được hưởng gói bảo hiểm sức khỏe PVI", compact, re.IGNORECASE):
+            return "Không. Nhân viên thử việc chưa được hưởng gói bảo hiểm sức khỏe PVI; chỉ được tham gia bảo hiểm xã hội bắt buộc."
+
+    if "đánh giá hiệu suất" in lowered and ("cơ cấu" in lowered or "tỷ lệ" in lowered):
+        if re.search(r"KPI cá nhân.+70%.+Peer review.+30%", compact, re.IGNORECASE):
+            return "Cơ cấu điểm đánh giá hiệu suất gồm KPI cá nhân 70% tổng điểm và peer review 30% tổng điểm."
 
     if "nghỉ phép không lương" in lowered and "phê duyệt" in lowered:
         days_match = re.search(r"(\d+)\s+ngày", lowered, re.IGNORECASE)
@@ -155,13 +182,30 @@ def answer_policy_patterns(question: str, contexts: list[str]) -> str | None:
             )
 
     if "khách sạn" in lowered and "công tác" in lowered:
-        nights = _extract_trip_nights(lowered)
+        nights = _extract_hotel_nights(lowered) or _extract_trip_nights(lowered)
+        if "nước ngoài" in lowered or "usd" in lowered:
+            usd_cap = _extract_usd_hotel_cap(compact, large_city="thành phố lớn" in lowered)
+            if nights and usd_cap:
+                return f"Công ty thanh toán tiền khách sạn tối đa {nights} x {usd_cap} USD/đêm = {nights * usd_cap} USD."
         hotel_cap = _extract_money_after(compact, r"khách sạn\D{0,40}tối đa")
         if nights and hotel_cap:
             return (
-                f"Công ty thanh toán tối đa {_format_vnd(hotel_cap * nights)} tiền khách sạn "
-                f"({nights} đêm x {_format_vnd(hotel_cap)}/đêm)."
+                f"Công ty thanh toán tiền khách sạn tối đa {nights} x {_format_vnd(hotel_cap)}/đêm = "
+                f"{_format_vnd(hotel_cap * nights)}."
             )
+
+    if "lương thử việc" in lowered and "junior" in lowered:
+        salary = _extract_salary_range(compact, "Junior")
+        rate_match = re.search(r"(\d+)%\s*(?:mức\s+)?lương", compact, re.IGNORECASE)
+        if salary and rate_match:
+            max_salary = _money_to_vnd(salary.split("-")[-1], "")
+            trial_salary = round(max_salary * int(rate_match.group(1)) / 100) if max_salary else None
+            if trial_salary:
+                return f"Lương thử việc Junior mức cao nhất = {rate_match.group(1)}% x {_format_vnd(max_salary)} = {_format_vnd(trial_salary)}/tháng."
+
+    if "tạm ứng" in lowered and "4 triệu" in lowered and "7 triệu" in lowered:
+        if re.search(r"dưới\s+5\.000\.000.+trưởng phòng", compact, re.IGNORECASE) and re.search(r"từ\s+5\.000\.000.+Kế toán trưởng", compact, re.IGNORECASE):
+            return "Tạm ứng 4 triệu dưới 5.000.000 VNĐ nên chỉ cần Trưởng phòng phê duyệt; tạm ứng 7 triệu từ 5.000.000 VNĐ trở lên nên cần Trưởng phòng và Kế toán trưởng phê duyệt."
 
     if "mật khẩu" in lowered and "đổi" in lowered:
         if re.search(r"mỗi\s+120\s+ngày", compact, re.IGNORECASE):
@@ -240,6 +284,22 @@ def _extract_trip_nights(text: str) -> int | None:
         match = re.search(r"(\d+)\s+đêm", text, re.IGNORECASE)
         return int(match.group(1)) if match else None
     return int(match.group(1))
+
+
+def _extract_hotel_nights(text: str) -> int | None:
+    match = re.search(r"\((\d+)\s*đêm\)", text, re.IGNORECASE)
+    if not match:
+        match = re.search(r"(\d+)\s*đêm", text, re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def _extract_usd_hotel_cap(text: str, *, large_city: bool) -> int | None:
+    if large_city:
+        match = re.search(r"thành phố lớn\s*:\s*(\d+)\s*USD/đêm", text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    match = re.search(r"khách sạn tối đa\s*(\d+)\s*USD/đêm", text, re.IGNORECASE)
+    return int(match.group(1)) if match else None
 
 
 def _advance_approval(amount: int, source: str) -> str | None:

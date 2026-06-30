@@ -56,7 +56,7 @@ User Response
 
 | Metric | Result |
 |---|---:|
-| RAGAS avg_score (50q) | 0.799 |
+| RAGAS avg_score (50q) | 0.812 |
 | Worst metric | answer_relevancy |
 | Dominant failure distribution | factual |
 | Cohen's kappa | 1.000 |
