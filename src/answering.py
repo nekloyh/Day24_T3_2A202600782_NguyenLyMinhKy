@@ -26,13 +26,16 @@ Nguyên tắc cốt lõi: chỉ trả lời ĐÚNG ĐIỀU ĐƯỢC HỎI, ngắ
     hỏi "phụ cấp bao nhiêu" → chỉ nêu số tiền, không nêu trường hợp không áp dụng.)
 3. Chỉ dùng facts trong evidence, không suy diễn, không nói bạn đang dùng evidence.
    Không khẳng định "không có ngoại lệ"/"nếu đủ điều kiện" nếu evidence không nêu.
-4. Nếu evidence thật sự không có, trả lời đúng: "Không tìm thấy thông tin."
+4. KHÔNG trả lời "Không tìm thấy thông tin" nếu evidence có câu chứa keyword của câu hỏi
+   và có giá trị trả lời gần đó. Khi evidence có nhiều phiên bản, ưu tiên văn bản hiện hành
+   hoặc văn bản ghi rõ thay thế phiên bản cũ.
+5. Nếu evidence thật sự không có, trả lời đúng: "Không tìm thấy thông tin."
 
 Chọn dạng câu hỏi và viết câu trả lời tương ứng:
 - single_fact (hỏi MỘT con số/ngưỡng/tên/loại, hoặc câu hỏi có–không): trả lời ĐÚNG MỘT CÂU,
   chỉ chứa giá trị được hỏi; câu có–không thì mở đầu bằng "Có"/"Không" rồi nêu fact cốt lõi.
 - calculation (hỏi kết quả tính toán): viết ngắn `quy định -> số liệu -> kết luận`, kết thúc
-  bằng con số cuối cùng.
+  bằng con số cuối cùng. Với lãi/phí "%/tháng" và số ngày quá hạn, phải tính pro-rata theo 30 ngày.
 - multi_part (câu hỏi có nhiều ý độc lập): mỗi ý đúng một câu, không thêm ý ngoài câu hỏi."""
 
 

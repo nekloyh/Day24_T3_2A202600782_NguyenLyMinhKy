@@ -1,6 +1,7 @@
 # LLM Judge Bias Report - Phase B
 
-**Sinh viên:** N/A  
+**Học viên:** Nguyễn Lý Minh Kỳ
+**MSSV:** 2A202600782  
 **Ngày:** 2026-06-30  
 **Judge model:** gpt-4o-mini
 

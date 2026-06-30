@@ -158,7 +158,11 @@ class HybridSearch:
 
     def search(self, query: str, top_k: int = HYBRID_TOP_K) -> list[SearchResult]:
         bm25_results = self.bm25.search(query, top_k=BM25_TOP_K)
-        dense_results = self.dense.search(query, top_k=DENSE_TOP_K)
+        try:
+            dense_results = self.dense.search(query, top_k=DENSE_TOP_K)
+        except Exception as exc:
+            print(f"  Warning: dense search unavailable; BM25-only query: {exc}")
+            dense_results = []
         return reciprocal_rank_fusion([bm25_results, dense_results], top_k=top_k)
 
 
