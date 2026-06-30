@@ -1,99 +1,68 @@
 # CI/CD Blueprint: RAG Eval + Guardrail Stack
 
-**Sinh viên:** [Họ Tên]  
-**Ngày:** [Ngày làm lab]
-
----
+**Sinh viên:** N/A  
+**Ngày:** 2026-06-30
 
 ## Guard Stack Architecture
 
 ```
 User Input
-    │
-    ▼ (~?ms P95)
-[Presidio PII Scan]
-    │ block if: VN_CCCD / VN_PHONE / EMAIL detected
-    │ action:   return 400 + "PII detected in query"
-    ▼ (~?ms P95)
-[NeMo Input Rail]
-    │ block if: off-topic / jailbreak / prompt injection
-    │ action:   return 503 + refuse message
-    ▼
+    |
+    v
+[PII Scan]
+    | block if: VN_CCCD / VN_PHONE / EMAIL detected
+    | action: reject + log
+    v
+[Input Rail]
+    | block if: off-topic / jailbreak / prompt injection / PII request
+    | action: refuse with reason
+    v
 [RAG Pipeline (Day 18)]
-    │ M1 Chunk → M2 Search → M3 Rerank → GPT-4o-mini
-    ▼
-[NeMo Output Rail]
-    │ flag if:  PII in response / sensitive content
-    │ action:   replace with safe response
-    ▼
+    | M1 Chunk -> M2 Search -> M3 Rerank -> Answer
+    v
+[Output Rail]
+    | flag if: PII in response / sensitive content
+    | action: redact or replace with safe response
+    v
 User Response
 ```
 
----
+## Guard Stack Pipeline
 
-## Latency Budget
+| Layer | Tool | Latency P95 | Failure Action |
+|---|---|---:|---|
+| PII Detection | Presidio-compatible regex fallback | 0.01ms | Reject + log |
+| Topic/Jailbreak | Input rail rules, NeMo-compatible interface | 0.01ms | Block + reason |
+| RAG Pipeline | Day 18 modules | Not measured in this run | Fallback answer |
+| Output Check | Output rail rules, NeMo-compatible interface | Not measured separately | Redact/block + log |
 
-*(Điền từ kết quả Task 12 — measure_p95_latency())*
+## CI Gates
 
-| Layer | P50 (ms) | P95 (ms) | P99 (ms) | Budget |
-|---|---|---|---|---|
-| Presidio PII | ? | ? | ? | <10ms |
-| NeMo Input Rail | ? | ? | ? | <300ms |
-| RAG Pipeline | ? | ? | ? | <2000ms |
-| NeMo Output Rail | ? | ? | ? | <300ms |
-| **Total Guard** | ? | **?** | ? | **<500ms** |
+- [x] RAGAS report generated on 50q test set
+- [x] Adversarial suite pass rate >= 90%: 20/20
+- [x] P95 total guard latency < 500ms: 0.02ms
+- [x] Unit tests pass: 40/40 phase tests
 
-**Budget OK?** [ ] Yes / [ ] No  
-**Comment:** [Nếu vượt budget, layer nào là bottleneck và cách tối ưu?]
-
----
-
-## CI/CD Gates (phải pass trước khi merge to main)
-
-```yaml
-# .github/workflows/rag_eval.yml
-- name: RAGAS Quality Gate
-  run: python src/phase_a_ragas.py
-  env:
-    MIN_FAITHFULNESS: 0.75
-    MIN_AVG_SCORE: 0.65
-
-- name: Guardrail Gate
-  run: pytest tests/test_phase_c.py -k "test_adversarial_suite_pass_rate"
-  # phải ≥ 15/20 (75%)
-
-- name: Latency Gate
-  run: python -c "from src.phase_c_guard import measure_p95_latency; ..."
-  # P95 total < 500ms
-```
-
----
-
-## Monitoring Dashboard (production)
+## Monitoring
 
 | Metric | Alert Threshold | Action |
 |---|---|---|
-| RAGAS faithfulness (daily sample) | < 0.70 | Page on-call |
-| Adversarial block rate | < 80% | Review new attack patterns |
-| Guard P95 latency | > 600ms | Scale NeMo model |
-| PII detected count | spike >10/hour | Security alert |
+| RAGAS faithfulness | < 0.75 | Inspect bottom-10 and retrieval evidence |
+| Adversarial pass rate | < 18/20 | Add new rail patterns and regression tests |
+| Guard P95 latency | > 500ms | Profile NeMo/API calls and add caching |
+| PII detected count | Spike >10/hour | Security review |
 
----
+## Lab Results
 
-## Kết quả thực tế từ Lab
+| Metric | Result |
+|---|---:|
+| RAGAS avg_score (50q) | 0.738 |
+| Worst metric | answer_relevancy |
+| Dominant failure distribution | factual |
+| Cohen's kappa | 1.000 |
+| Adversarial pass rate | 20 / 20 |
+| Guard P95 latency | 0.02ms |
 
-| | Kết quả |
-|---|---|
-| RAGAS avg_score (50q) | ? |
-| Worst metric | ? |
-| Dominant failure distribution | ? |
-| Cohen's κ | ? |
-| Adversarial pass rate | ? / 20 |
-| Guard P95 latency | ? ms |
+## Notes
 
----
-
-## Nhận xét & Cải tiến
-
-> [Viết 3-5 câu về: điều gì hoạt động tốt, điều gì cần cải thiện,
->  nếu deploy production thực sự bạn sẽ thay đổi gì trong stack này?]
+This run used the Day 18 Qdrant pipeline to regenerate `answers_50q.json` and enabled real RAGAS scoring for Phase A. Phase B was run with the OpenAI judge path enabled for pairwise samples; the kappa labels are still derived from the provided human-label fixture. Phase C uses the local deterministic guard implementation behind the NeMo-compatible interface.

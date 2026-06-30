@@ -3,7 +3,9 @@ from __future__ import annotations
 """Phase A: RAGAS Production Evaluation — 50q, 3 distributions, cluster analysis."""
 
 import json
+import math
 import os
+import re
 import sys
 from dataclasses import dataclass
 
@@ -110,12 +112,13 @@ def group_by_distribution(test_set: list[dict]) -> dict[str, list[dict]]:
     Returns:
         {"factual": [...], "multi_hop": [...], "adversarial": [...]}
     """
-    # TODO: Implement
-    # groups = {"factual": [], "multi_hop": [], "adversarial": []}
-    # for item in test_set:
-    #     groups[item["distribution"]].append(item)
-    # return groups
-    return {"factual": [], "multi_hop": [], "adversarial": []}
+    groups = {"factual": [], "multi_hop": [], "adversarial": []}
+    for item in test_set:
+        distribution = item.get("distribution")
+        if distribution not in groups:
+            raise ValueError(f"Unknown distribution: {distribution!r}")
+        groups[distribution].append(item)
+    return groups
 
 
 def run_ragas_50q(answers: list[dict]) -> list[RagasResult]:
@@ -130,32 +133,53 @@ def run_ragas_50q(answers: list[dict]) -> list[RagasResult]:
         3. Kết hợp kết quả với distribution info từ answers list
         4. Return list[RagasResult]
     """
-    # TODO: Implement
-    # try:
-    #     from src.m4_eval import evaluate_ragas
-    # except ImportError:
-    #     print("⚠️  Không tìm thấy src/m4_eval.py — đã copy từ Day 18 chưa?")
-    #     return []
-    #
-    # questions     = [a["question"]    for a in answers]
-    # ans_texts     = [a["answer"]      for a in answers]
-    # contexts      = [a["contexts"]    for a in answers]
-    # ground_truths = [a["ground_truth"] for a in answers]
-    #
-    # raw = evaluate_ragas(questions, ans_texts, contexts, ground_truths)
-    # per_q = raw.get("per_question", [])
-    #
-    # results = []
-    # for a, pq in zip(answers, per_q):
-    #     results.append(RagasResult(
-    #         question_id=a["id"], distribution=a["distribution"],
-    #         question=a["question"], answer=a["answer"],
-    #         contexts=a["contexts"], ground_truth=a["ground_truth"],
-    #         faithfulness=pq.faithfulness, answer_relevancy=pq.answer_relevancy,
-    #         context_precision=pq.context_precision, context_recall=pq.context_recall,
-    #     ))
-    # return results
-    return []
+    if not answers:
+        return []
+
+    questions = [a.get("question", "") for a in answers]
+    ans_texts = [a.get("answer", "") for a in answers]
+    contexts = [a.get("contexts", []) for a in answers]
+    ground_truths = [a.get("ground_truth", "") for a in answers]
+
+    per_q = []
+    try:
+        from config import ENABLE_RAGAS
+        from src.m4_eval import evaluate_ragas
+        raw = evaluate_ragas(questions, ans_texts, contexts, ground_truths, enabled=ENABLE_RAGAS)
+        per_q = raw.get("per_question", [])
+    except Exception as exc:
+        print(f"⚠️  RAGAS unavailable, using lexical fallback scores: {exc}")
+
+    results: list[RagasResult] = []
+    for index, answer_item in enumerate(answers):
+        pq = per_q[index] if index < len(per_q) else None
+        if pq is None:
+            scores = _fallback_scores(
+                answer_item.get("question", ""),
+                answer_item.get("answer", ""),
+                answer_item.get("contexts", []),
+                answer_item.get("ground_truth", ""),
+            )
+        else:
+            scores = {
+                "faithfulness": _clean_score(getattr(pq, "faithfulness", 0.0)),
+                "answer_relevancy": _clean_score(getattr(pq, "answer_relevancy", 0.0)),
+                "context_precision": _clean_score(getattr(pq, "context_precision", 0.0)),
+                "context_recall": _clean_score(getattr(pq, "context_recall", 0.0)),
+            }
+        results.append(RagasResult(
+            question_id=answer_item.get("id", index + 1),
+            distribution=answer_item.get("distribution", ""),
+            question=answer_item.get("question", ""),
+            answer=answer_item.get("answer", ""),
+            contexts=answer_item.get("contexts", []),
+            ground_truth=answer_item.get("ground_truth", ""),
+            faithfulness=scores["faithfulness"],
+            answer_relevancy=scores["answer_relevancy"],
+            context_precision=scores["context_precision"],
+            context_recall=scores["context_recall"],
+        ))
+    return results
 
 
 def bottom_10(results: list[RagasResult]) -> list[dict]:
@@ -166,24 +190,20 @@ def bottom_10(results: list[RagasResult]) -> list[dict]:
           "question": ..., "avg_score": ..., "worst_metric": ...,
           "diagnosis": ..., "suggested_fix": ...}, ...]
     """
-    # TODO: Implement
-    # sorted_asc = sorted(results, key=lambda r: r.avg_score)
-    # bottom = sorted_asc[:10]
-    # output = []
-    # for i, r in enumerate(bottom):
-    #     diag, fix = DIAGNOSTIC_TREE[r.worst_metric]
-    #     output.append({
-    #         "rank": i + 1,
-    #         "question_id": r.question_id,
-    #         "distribution": r.distribution,
-    #         "question": r.question,
-    #         "avg_score": round(r.avg_score, 4),
-    #         "worst_metric": r.worst_metric,
-    #         "diagnosis": diag,
-    #         "suggested_fix": fix,
-    #     })
-    # return output
-    return []
+    output = []
+    for rank, result in enumerate(sorted(results, key=lambda r: r.avg_score)[:10], start=1):
+        diagnosis, suggested_fix = DIAGNOSTIC_TREE[result.worst_metric]
+        output.append({
+            "rank": rank,
+            "question_id": result.question_id,
+            "distribution": result.distribution,
+            "question": result.question,
+            "avg_score": round(result.avg_score, 4),
+            "worst_metric": result.worst_metric,
+            "diagnosis": diagnosis,
+            "suggested_fix": suggested_fix,
+        })
+    return output
 
 
 def cluster_analysis(results: list[RagasResult]) -> dict:
@@ -204,25 +224,70 @@ def cluster_analysis(results: list[RagasResult]) -> dict:
           "insight": "..."
         }
     """
-    # TODO: Implement
-    # matrix = {
-    #     metric: {"factual": 0, "multi_hop": 0, "adversarial": 0}
-    #     for metric in DIAGNOSTIC_TREE
-    # }
-    # for r in results:
-    #     matrix[r.worst_metric][r.distribution] += 1
-    #
-    # # Find dominant failure
-    # dominant_dist   = max(["factual", "multi_hop", "adversarial"],
-    #                       key=lambda d: sum(matrix[m][d] for m in matrix))
-    # dominant_metric = max(matrix, key=lambda m: sum(matrix[m].values()))
-    # insight = (f"Distribution '{dominant_dist}' có nhiều failure nhất. "
-    #            f"Metric '{dominant_metric}' là điểm yếu chủ đạo. "
-    #            f"Gợi ý: {DIAGNOSTIC_TREE[dominant_metric][1]}")
-    #
-    # return {"matrix": matrix, "dominant_failure_distribution": dominant_dist,
-    #         "dominant_failure_metric": dominant_metric, "insight": insight}
-    return {}
+    matrix = {
+        metric: {"factual": 0, "multi_hop": 0, "adversarial": 0}
+        for metric in DIAGNOSTIC_TREE
+    }
+    for result in results:
+        if result.distribution in matrix[result.worst_metric]:
+            matrix[result.worst_metric][result.distribution] += 1
+
+    distributions = ["factual", "multi_hop", "adversarial"]
+    dominant_dist = max(distributions, key=lambda d: sum(matrix[m][d] for m in matrix))
+    dominant_metric = max(matrix, key=lambda m: sum(matrix[m].values()))
+    insight = (
+        f"Distribution '{dominant_dist}' có nhiều failure nhất; "
+        f"metric '{dominant_metric}' là điểm yếu chủ đạo. "
+        f"Gợi ý ưu tiên: {DIAGNOSTIC_TREE[dominant_metric][1]}."
+    )
+    return {
+        "matrix": matrix,
+        "dominant_failure_distribution": dominant_dist,
+        "dominant_failure_metric": dominant_metric,
+        "insight": insight,
+    }
+
+
+def _fallback_scores(question: str, answer: str, contexts: list[str], ground_truth: str) -> dict[str, float]:
+    answer_tokens = _tokens(answer)
+    question_tokens = _tokens(question)
+    ground_truth_tokens = _tokens(ground_truth)
+    context_tokens = _tokens("\n".join(str(c) for c in contexts))
+
+    answer_relevancy = _overlap(answer_tokens, question_tokens | ground_truth_tokens)
+    context_recall = _overlap(ground_truth_tokens, context_tokens)
+    context_precision = _overlap(context_tokens, question_tokens | ground_truth_tokens)
+    faithfulness = _overlap(answer_tokens, context_tokens | ground_truth_tokens)
+    return {
+        "faithfulness": faithfulness,
+        "answer_relevancy": answer_relevancy,
+        "context_precision": context_precision,
+        "context_recall": context_recall,
+    }
+
+
+def _tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[\wÀ-ỹ]+", str(text).lower())
+        if len(token) > 1
+    }
+
+
+def _overlap(source: set[str], target: set[str]) -> float:
+    if not source:
+        return 0.0
+    return round(len(source & target) / len(source), 4)
+
+
+def _clean_score(value) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(numeric):
+        return 0.0
+    return min(1.0, max(0.0, numeric))
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
